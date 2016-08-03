@@ -65,6 +65,70 @@ public class ActivityHandler extends HandlerThread implements IActivityHandler {
     private ISdkClickHandler sdkClickHandler;
     private SessionParameters sessionParameters;
 
+    @Override
+    public void teardown(boolean deleteState) {
+        if (backgroundTimer != null) {
+            backgroundTimer.cancel(true);
+        }
+        if (foregroundTimer != null) {
+            foregroundTimer.cancel(true);
+        }
+        if (delayStartTimer != null) {
+            delayStartTimer.cancel(true);
+        }
+        if (scheduler != null) {
+            try {
+                scheduler.shutdownNow();
+            } catch(SecurityException se) {}
+        }
+        if (internalHandler == null) {
+            internalHandler.removeCallbacksAndMessages(null);
+        }
+        if (packageHandler != null) {
+            packageHandler.teardown(deleteState);
+        }
+        if (attributionHandler != null) {
+            attributionHandler.teardown();
+        }
+        if (sdkClickHandler != null) {
+            sdkClickHandler.teardown();
+        }
+        if (sessionParameters != null) {
+            if (sessionParameters.callbackParameters != null) {
+                sessionParameters.callbackParameters.clear();
+            }
+            if (sessionParameters.partnerParameters != null) {
+                sessionParameters.partnerParameters.clear();
+            }
+        }
+        if (deleteState && adjustConfig != null && adjustConfig.context!= null) {
+            deleteActivityState(adjustConfig.context);
+            deleteAttribution(adjustConfig.context);
+            deleteAllSessionParameters(adjustConfig.context);
+        }
+
+        internalHandler = null;
+        packageHandler = null;
+        activityState = null;
+        logger = null;
+        foregroundTimer = null;
+        scheduler = null;
+        backgroundTimer = null;
+        delayStartTimer = null;
+        internalState = null;
+        deviceInfo = null;
+        adjustConfig = null;
+        attribution = null;
+        attributionHandler = null;
+        sdkClickHandler = null;
+        sessionParameters = null;
+
+        try {
+            interrupt();
+        } catch (SecurityException se) {}
+        quit();
+    }
+
     public class InternalState {
         boolean enabled;
         boolean offline;
@@ -615,15 +679,17 @@ public class ActivityHandler extends HandlerThread implements IActivityHandler {
             sendReferrer(adjustConfig.referrer, adjustConfig.referrerClickTime); // send to background queue to make sure that activityState is valid
         }
 
-        foregroundTimer = new TimerCycle(new Runnable() {
-            @Override
-            public void run() {
-                foregroundTimerFired();
-            }
-        }, FOREGROUND_TIMER_START, FOREGROUND_TIMER_INTERVAL, FOREGROUND_TIMER_NAME);
+        scheduler = Executors.newSingleThreadScheduledExecutor();
+
+        foregroundTimer = new TimerCycle(scheduler,
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        foregroundTimerFired();
+                    }
+                }, FOREGROUND_TIMER_START, FOREGROUND_TIMER_INTERVAL, FOREGROUND_TIMER_NAME);
 
         // create background timer
-        scheduler = Executors.newSingleThreadScheduledExecutor();
         if (adjustConfig.sendInBackground) {
             logger.info("Send in background configured");
 
@@ -1128,6 +1194,13 @@ public class ActivityHandler extends HandlerThread implements IActivityHandler {
 
     public static boolean deleteAttribution(Context context) {
         return context.deleteFile(ATTRIBUTION_FILENAME);
+    }
+
+    public static boolean deleteAllSessionParameters(Context context) {
+        boolean sessionParametersDeleted = context.deleteFile(SESSION_PARAMETERS_FILENAME);
+        boolean sessionCallbackParametersDeleted = context.deleteFile(SESSION_CALLBACK_PARAMETERS_FILENAME);
+        boolean sessionPartnerParametersDeleted = context.deleteFile(SESSION_PARTNER_PARAMETERS_FILENAME);
+        return sessionParametersDeleted || sessionCallbackParametersDeleted || sessionPartnerParametersDeleted;
     }
 
     private void transferSessionPackageI(long now) {

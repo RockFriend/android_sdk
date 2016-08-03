@@ -18,4 +18,6 @@ public interface IPackageHandler {
     void resumeSending();
 
     void updatePackages(SessionParameters sessionParameterss);
+
+    void teardown(boolean deleteState);
 }
